@@ -1,6 +1,7 @@
 import { useAppContext } from '../../context/AppContext';
 import { DrumTool } from '../drum/DrumTool';
 import { MultisampleTool } from '../multisample/MultisampleTool';
+import { SnapshotsTool } from '../snapshots/SnapshotsTool';
 import { LibraryPage } from '../library/LibraryPage';
 import { FeedbackPage } from './FeedbackPage';
 import { DonatePage } from './DonatePage';
@@ -10,7 +11,7 @@ import { FEATURE_FLAGS } from '../../utils/constants';
 export function MainTabs() {
   const { state, dispatch } = useAppContext();
 
-  const handleTabChange = (tabName: 'drum' | 'multisample' | 'feedback' | 'library' | 'donate') => {
+  const handleTabChange = (tabName: 'drum' | 'multisample' | 'snapshots' | 'feedback' | 'library' | 'donate') => {
     dispatch({ type: 'SET_TAB', payload: tabName });
   };
 
@@ -45,7 +46,7 @@ export function MainTabs() {
       )}
       
       {state.currentTab === 'multisample' && (
-        <div 
+        <div
           role="tabpanel"
           id="multisample-tabpanel"
           aria-labelledby="multisample-tab"
@@ -55,7 +56,19 @@ export function MainTabs() {
           <MultisampleTool />
         </div>
       )}
-      
+
+      {state.currentTab === 'snapshots' && (
+        <div
+          role="tabpanel"
+          id="snapshots-tabpanel"
+          aria-labelledby="snapshots-tab"
+          aria-label="snapshots and transitions content"
+          style={tabPanelStyle}
+        >
+          <SnapshotsTool />
+        </div>
+      )}
+
       {state.currentTab === 'feedback' && (
         <div
           role="tabpanel"

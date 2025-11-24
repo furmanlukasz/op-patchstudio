@@ -1,7 +1,7 @@
 import { FEATURE_FLAGS } from '../../utils/constants';
 import { useEffect, useState } from 'react';
 
-type TabName = 'drum' | 'multisample' | 'feedback' | 'library' | 'donate';
+type TabName = 'drum' | 'multisample' | 'snapshots' | 'feedback' | 'library' | 'donate';
 
 interface TabNavigationProps {
   currentTab: TabName;
@@ -27,7 +27,7 @@ export function TabNavigation({ currentTab, onTabChange }: TabNavigationProps) {
       onTabChange(tabName);
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
-      const baseTabs = ['drum', 'multisample', 'library'] as const;
+      const baseTabs = ['drum', 'multisample', 'snapshots', 'library'] as const;
       const tabs = FEATURE_FLAGS.DONATE_PAGE ? [...baseTabs, 'donate', 'feedback'] : [...baseTabs, 'feedback'];
       const currentIndex = tabs.indexOf(currentTab as any);
       const direction = e.key === 'ArrowLeft' ? -1 : 1;
@@ -35,12 +35,12 @@ export function TabNavigation({ currentTab, onTabChange }: TabNavigationProps) {
       onTabChange(tabs[newIndex] as TabName);
     } else if (e.key === 'Home') {
       e.preventDefault();
-      const baseTabs = ['drum', 'multisample', 'library'] as const;
+      const baseTabs = ['drum', 'multisample', 'snapshots', 'library'] as const;
       const tabs = FEATURE_FLAGS.DONATE_PAGE ? [...baseTabs, 'donate', 'feedback'] : [...baseTabs, 'feedback'];
       onTabChange(tabs[0] as TabName);
     } else if (e.key === 'End') {
       e.preventDefault();
-      const baseTabs = ['drum', 'multisample', 'library'] as const;
+      const baseTabs = ['drum', 'multisample', 'snapshots', 'library'] as const;
       const tabs = FEATURE_FLAGS.DONATE_PAGE ? [...baseTabs, 'donate', 'feedback'] : [...baseTabs, 'feedback'];
       onTabChange(tabs[tabs.length - 1] as TabName);
     }
@@ -127,6 +127,7 @@ export function TabNavigation({ currentTab, onTabChange }: TabNavigationProps) {
     >
       {renderTab('drum', 'drum')}
       {renderTab('multisample', 'multisample')}
+      {renderTab('snapshots', 'snapshots')}
       {renderTab('library', 'library')}
       {FEATURE_FLAGS.DONATE_PAGE && renderTab('donate', 'donate')}
       {renderTab('feedback', 'feedback')}

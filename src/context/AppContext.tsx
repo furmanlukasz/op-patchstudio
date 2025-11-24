@@ -7,6 +7,8 @@ import { cookieUtils, COOKIE_KEYS } from '../utils/cookies';
 import type { FilenameSeparator } from '../utils/constants';
 import { loadDrumDefaultSettings, loadMultisampleDefaultSettings, loadDrumImportedPreset, loadMultisampleImportedPreset } from '../utils/defaultSettings';
 import { applyZeroCrossingToMarkers } from '../utils/audio';
+import type { SnapshotsState } from '../features/snapshots/types';
+import { DEFAULT_SNAPSHOTS_STATE } from '../features/snapshots/types';
 
 // Define enhanced types for the application state
 export interface DrumSample {
@@ -60,7 +62,7 @@ export interface MultisampleFile {
 
 export interface AppState {
   // Current tab
-  currentTab: 'drum' | 'multisample' | 'feedback' | 'library' | 'donate';
+  currentTab: 'drum' | 'multisample' | 'snapshots' | 'feedback' | 'library' | 'donate';
   
   // Drum tool settings
   drumSettings: {
@@ -149,11 +151,14 @@ export interface AppState {
   
   // MIDI note mapping convention
   midiNoteMapping: 'C3' | 'C4';
+
+  // Snapshots/Transitions state
+  snapshotsState: SnapshotsState;
 }
 
 // Define enhanced action types
-export type AppAction = 
-  | { type: 'SET_TAB'; payload: 'drum' | 'multisample' | 'feedback' | 'library' | 'donate' }
+export type AppAction =
+  | { type: 'SET_TAB'; payload: 'drum' | 'multisample' | 'snapshots' | 'feedback' | 'library' | 'donate' }
   | { type: 'SET_DRUM_SAMPLE_RATE'; payload: number }
   | { type: 'SET_DRUM_BIT_DEPTH'; payload: number }
   | { type: 'SET_DRUM_CHANNELS'; payload: number }
@@ -226,7 +231,8 @@ export type AppAction =
   | { type: 'SET_MIDI_NOTE_MAPPING'; payload: 'C3' | 'C4' }
   | { type: 'UPDATE_ALL_MULTI_SAMPLES'; payload: Partial<MultisampleFile> }
   | { type: 'UPDATE_ALL_DRUM_SAMPLES'; payload: Partial<DrumSample> }
-  | { type: 'CLEAR_ALL_DRUM_SAMPLES' };
+  | { type: 'CLEAR_ALL_DRUM_SAMPLES' }
+  | { type: 'UPDATE_SNAPSHOTS_STATE'; payload: Partial<SnapshotsState> };
 
 // Initial state for drum samples
 const initialDrumSample: DrumSample = {
@@ -325,7 +331,8 @@ const initialState: AppState = {
   importedMultisamplePreset: loadMultisampleImportedPreset(),
   isSessionRestorationModalOpen: false,
   sessionInfo: null,
-  midiNoteMapping: getInitialMidiMapping()
+  midiNoteMapping: getInitialMidiMapping(),
+  snapshotsState: DEFAULT_SNAPSHOTS_STATE
 };
 
 // Enhanced reducer function
@@ -1317,6 +1324,16 @@ function appReducer(state: AppState, action: AppAction): AppState {
           }
           return sample;
         }),
+      };
+    }
+
+    case 'UPDATE_SNAPSHOTS_STATE': {
+      return {
+        ...state,
+        snapshotsState: {
+          ...state.snapshotsState,
+          ...action.payload,
+        },
       };
     }
 
