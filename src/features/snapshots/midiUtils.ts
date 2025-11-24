@@ -259,12 +259,14 @@ export function createNRPNMessage(
 
 export type MidiClockCallback = () => void;
 export type MidiTransportCallback = () => void;
+export type MidiControlChangeCallback = (cc: number, value: number, channel: number) => void;
 
 interface MidiClockListeners {
   onClockTick: MidiClockCallback[];
   onStart: MidiTransportCallback[];
   onStop: MidiTransportCallback[];
   onContinue: MidiTransportCallback[];
+  onControlChange: MidiControlChangeCallback[];
 }
 
 const clockListeners: MidiClockListeners = {
@@ -272,6 +274,7 @@ const clockListeners: MidiClockListeners = {
   onStart: [],
   onStop: [],
   onContinue: [],
+  onControlChange: [],
 };
 
 /**
@@ -299,6 +302,16 @@ export function setupMidiClockListeners(): void {
     // Listen for continue messages
     input.addListener('continue', () => {
       clockListeners.onContinue.forEach((callback) => callback());
+    });
+
+    // Listen for control change messages (e.g., tempo CC80)
+    input.addListener('controlchange', (e) => {
+      const ccNumber = typeof e.controller === 'object' ? e.controller.number : e.controller;
+      const channel = e.message.channel || 1;
+      const value = typeof e.value === 'number' ? e.value : 0;
+      clockListeners.onControlChange.forEach((callback) =>
+        callback(ccNumber, value, channel)
+      );
     });
   });
 }
@@ -361,6 +374,20 @@ export function onMidiContinue(callback: MidiTransportCallback): () => void {
 }
 
 /**
+ * Add MIDI Control Change listener
+ */
+export function onMidiControlChange(callback: MidiControlChangeCallback): () => void {
+  clockListeners.onControlChange.push(callback);
+
+  return () => {
+    const index = clockListeners.onControlChange.indexOf(callback);
+    if (index > -1) {
+      clockListeners.onControlChange.splice(index, 1);
+    }
+  };
+}
+
+/**
  * Remove all clock listeners
  */
 export function removeAllClockListeners(): void {
@@ -368,6 +395,7 @@ export function removeAllClockListeners(): void {
   clockListeners.onStart = [];
   clockListeners.onStop = [];
   clockListeners.onContinue = [];
+  clockListeners.onControlChange = [];
 }
 
 // ============================================================================
