@@ -78,31 +78,71 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
   const [scheduledTransition, setScheduledTransition] = useState<ScheduledTransition | null>(null);
   const [interpolationState, setInterpolationState] = useState<InterpolationState | null>(null);
 
+  // Use ref to track clock source so callbacks always have latest value
+  const clockSourceRef = useRef(snapshotsState.clockState.source);
+  const clockStateRef = useRef(snapshotsState.clockState);
+
+  // Update refs when state changes
+  useEffect(() => {
+    clockSourceRef.current = snapshotsState.clockState.source;
+    clockStateRef.current = snapshotsState.clockState;
+  }, [snapshotsState.clockState]);
+
   // Setup MIDI Clock listeners
   useEffect(() => {
     setupMidiClockListeners();
 
     const unsubscribeTick = onMidiClockTick(() => {
-      if (snapshotsState.clockState.source === 'midi') {
+      if (clockSourceRef.current === 'midi') {
         clockEngineRef.current.processMidiClockTick();
       }
     });
 
     const unsubscribeStart = onMidiStart(() => {
-      if (snapshotsState.clockState.source === 'midi') {
+      if (clockSourceRef.current === 'midi') {
         clockEngineRef.current.processMidiStart();
+        // Update app state to show clock is running
+        dispatch({
+          type: 'UPDATE_SNAPSHOTS_STATE',
+          payload: {
+            clockState: {
+              ...clockStateRef.current,
+              isRunning: true,
+            },
+          },
+        });
       }
     });
 
     const unsubscribeStop = onMidiStop(() => {
-      if (snapshotsState.clockState.source === 'midi') {
+      if (clockSourceRef.current === 'midi') {
         clockEngineRef.current.processMidiStop();
+        // Update app state to show clock is stopped
+        dispatch({
+          type: 'UPDATE_SNAPSHOTS_STATE',
+          payload: {
+            clockState: {
+              ...clockStateRef.current,
+              isRunning: false,
+            },
+          },
+        });
       }
     });
 
     const unsubscribeContinue = onMidiContinue(() => {
-      if (snapshotsState.clockState.source === 'midi') {
+      if (clockSourceRef.current === 'midi') {
         clockEngineRef.current.processMidiContinue();
+        // Update app state to show clock is running
+        dispatch({
+          type: 'UPDATE_SNAPSHOTS_STATE',
+          payload: {
+            clockState: {
+              ...clockStateRef.current,
+              isRunning: true,
+            },
+          },
+        });
       }
     });
 
@@ -112,7 +152,7 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
       unsubscribeStop();
       unsubscribeContinue();
     };
-  }, [snapshotsState.clockState.source]);
+  }, [dispatch]);
 
   // Setup clock event listeners
   useEffect(() => {
@@ -190,6 +230,19 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
   const setBpm = useCallback(
     (bpm: number) => {
       clockEngineRef.current.setBpm(bpm);
+
+      // Send CC80 (Tempo) to OP-XY
+      // Convert BPM (20-300) to MIDI value (0-127)
+      // Assuming linear mapping: BPM 20 = 0, BPM 300 = 127
+      const midiValue = Math.round(((bpm - 20) / (300 - 20)) * 127);
+      const tempoMessage: MIDIMessage = {
+        type: 'cc',
+        channel: 1,
+        cc: 80,
+        value: Math.max(0, Math.min(127, midiValue)),
+      };
+      sendMidiMessage(tempoMessage);
+
       dispatch({
         type: 'UPDATE_SNAPSHOTS_STATE',
         payload: {
