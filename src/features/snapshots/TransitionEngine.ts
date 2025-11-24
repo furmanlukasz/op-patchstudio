@@ -11,7 +11,6 @@
 
 import type {
   Snapshot,
-  TransitionMode,
   TransitionSettings,
   ScheduledTransition,
   InterpolationState,

@@ -163,7 +163,7 @@ export function sendProgramChange(channel: number, program: number): void {
  * This is a helper that would typically use the OPXY_PARAMETERS mapping
  */
 export function parameterToCC(
-  parameterId: string,
+  _parameterId: string,
   value: number,
   channel: number = 1,
   ccNumber: number = 0

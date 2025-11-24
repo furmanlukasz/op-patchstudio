@@ -19,7 +19,6 @@ export class ClockEngine {
   private tickCount: number = 0;
   private listeners: Map<string, ClockEventCallback[]> = new Map();
   private lastBeat: number = -1;
-  private lastBar: number = -1;
 
   constructor(initialState?: Partial<ClockState>) {
     this.state = {
@@ -71,7 +70,6 @@ export class ClockEngine {
     this.state.currentBar = 0;
     this.tickCount = 0;
     this.lastBeat = -1;
-    this.lastBar = -1;
   }
 
   /**
@@ -287,8 +285,6 @@ export class ClockEngine {
         beat: this.state.currentBeat,
         timestamp: now,
       });
-
-      this.lastBar = this.state.currentBar;
     }
 
     // Emit beat event
