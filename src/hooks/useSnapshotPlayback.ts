@@ -17,6 +17,8 @@ import {
   type InterpolationState,
   type ScheduledTransition,
   type MIDIMessage,
+  bpmToMidiValue,
+  midiValueToBpm,
 } from '../features/snapshots';
 import {
   sendMidiMessage,
@@ -25,6 +27,10 @@ import {
   onMidiStart,
   onMidiStop,
   onMidiContinue,
+  onMidiControlChange,
+  sendMidiStart,
+  sendMidiStop,
+  sendMidiClockTick,
 } from '../features/snapshots/midiUtils';
 
 export interface SnapshotPlaybackState {
@@ -146,13 +152,38 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
       }
     });
 
+    // Listen for CC80 (tempo) changes from OP-XY
+    const unsubscribeCC = onMidiControlChange((cc, value, channel) => {
+      if (cc === 80 && channel === 1) {
+        // Convert MIDI value back to BPM using OP-XY mapping
+        const newBpm = midiValueToBpm(value);
+        clockEngineRef.current.setBpm(newBpm);
+
+        // Update app state
+        dispatch({
+          type: 'UPDATE_SNAPSHOTS_STATE',
+          payload: {
+            clockState: {
+              ...clockStateRef.current,
+              bpm: newBpm,
+            },
+            transitionSettings: {
+              ...snapshotsState.transitionSettings,
+              internalBpm: newBpm,
+            },
+          },
+        });
+      }
+    });
+
     return () => {
       unsubscribeTick();
       unsubscribeStart();
       unsubscribeStop();
       unsubscribeContinue();
+      unsubscribeCC();
     };
-  }, [dispatch]);
+  }, [dispatch, snapshotsState.transitionSettings]);
 
   // Setup clock event listeners
   useEffect(() => {
@@ -165,8 +196,19 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
     // Listen to all clock events to update state
     clockEngine.on('all', updateClockState);
 
+    // Send MIDI clock ticks to OP-XY when using internal clock
+    const sendClockTick = () => {
+      if (clockSourceRef.current === 'internal' && clockEngine.getState().isRunning) {
+        sendMidiClockTick();
+      }
+    };
+
+    // Listen to tick events to send MIDI clock
+    clockEngine.on('tick', sendClockTick);
+
     return () => {
       clockEngine.off('all', updateClockState);
+      clockEngine.off('tick', sendClockTick);
     };
   }, []);
 
@@ -198,6 +240,12 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
   // Clock controls
   const startClock = useCallback(() => {
     clockEngineRef.current.start();
+
+    // Send MIDI Start message to OP-XY when using internal clock
+    if (snapshotsState.clockState.source === 'internal') {
+      sendMidiStart();
+    }
+
     dispatch({
       type: 'UPDATE_SNAPSHOTS_STATE',
       payload: {
@@ -211,6 +259,12 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
 
   const stopClock = useCallback(() => {
     clockEngineRef.current.stop();
+
+    // Send MIDI Stop message to OP-XY when using internal clock
+    if (snapshotsState.clockState.source === 'internal') {
+      sendMidiStop();
+    }
+
     dispatch({
       type: 'UPDATE_SNAPSHOTS_STATE',
       payload: {
@@ -232,14 +286,13 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
       clockEngineRef.current.setBpm(bpm);
 
       // Send CC80 (Tempo) to OP-XY
-      // Convert BPM (20-300) to MIDI value (0-127)
-      // Assuming linear mapping: BPM 20 = 0, BPM 300 = 127
-      const midiValue = Math.round(((bpm - 20) / (300 - 20)) * 127);
+      // Convert BPM (40-240) to MIDI value (0-127) using correct OP-XY mapping
+      const midiValue = bpmToMidiValue(bpm);
       const tempoMessage: MIDIMessage = {
         type: 'cc',
         channel: 1,
         cc: 80,
-        value: Math.max(0, Math.min(127, midiValue)),
+        value: midiValue,
       };
       sendMidiMessage(tempoMessage);
 

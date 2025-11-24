@@ -77,12 +77,14 @@ export {
   onMidiStart,
   onMidiStop,
   onMidiContinue,
+  onMidiControlChange,
   removeAllClockListeners,
   isMidiAvailable,
   getMidiOutputs,
   hasConnectedOutputs,
   type MidiClockCallback,
   type MidiTransportCallback,
+  type MidiControlChangeCallback,
 } from './midiUtils';
 
 // OP-XY Mapping Utilities
