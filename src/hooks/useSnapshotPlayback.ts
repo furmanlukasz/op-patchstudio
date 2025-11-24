@@ -153,10 +153,19 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
     });
 
     // Listen for CC80 (tempo) changes from OP-XY
+    // IMPORTANT: Only process incoming tempo when using MIDI clock source
+    // When using internal clock, the app is the tempo master
     const unsubscribeCC = onMidiControlChange((cc, value, channel) => {
-      if (cc === 80 && channel === 1) {
+      if (cc === 80 && channel === 1 && clockSourceRef.current === 'midi') {
         // Convert MIDI value back to BPM using OP-XY mapping
         const newBpm = midiValueToBpm(value);
+
+        // Validate BPM is in reasonable range (ignore very low values that might be noise)
+        if (newBpm < 40 || newBpm > 240) {
+          console.warn(`[MIDI] Ignoring invalid BPM from CC80: ${newBpm}`);
+          return;
+        }
+
         clockEngineRef.current.setBpm(newBpm);
 
         // Update app state
@@ -241,9 +250,20 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
   const startClock = useCallback(() => {
     clockEngineRef.current.start();
 
-    // Send MIDI Start message to OP-XY when using internal clock
+    // Send MIDI Start message and sync BPM to OP-XY when using internal clock
     if (snapshotsState.clockState.source === 'internal') {
       sendMidiStart();
+
+      // Sync current BPM to OP-XY to ensure they're in sync
+      const currentBpm = snapshotsState.clockState.bpm;
+      const midiValue = bpmToMidiValue(currentBpm);
+      const tempoMessage: MIDIMessage = {
+        type: 'cc',
+        channel: 1,
+        cc: 80,
+        value: midiValue,
+      };
+      sendMidiMessage(tempoMessage);
     }
 
     dispatch({
@@ -285,16 +305,19 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
     (bpm: number) => {
       clockEngineRef.current.setBpm(bpm);
 
-      // Send CC80 (Tempo) to OP-XY
-      // Convert BPM (40-240) to MIDI value (0-127) using correct OP-XY mapping
-      const midiValue = bpmToMidiValue(bpm);
-      const tempoMessage: MIDIMessage = {
-        type: 'cc',
-        channel: 1,
-        cc: 80,
-        value: midiValue,
-      };
-      sendMidiMessage(tempoMessage);
+      // Only send CC80 (Tempo) to OP-XY when using internal clock
+      // When using MIDI clock, OP-XY is the tempo master
+      if (snapshotsState.clockState.source === 'internal') {
+        // Convert BPM (40-240) to MIDI value (0-127) using correct OP-XY mapping
+        const midiValue = bpmToMidiValue(bpm);
+        const tempoMessage: MIDIMessage = {
+          type: 'cc',
+          channel: 1,
+          cc: 80,
+          value: midiValue,
+        };
+        sendMidiMessage(tempoMessage);
+      }
 
       dispatch({
         type: 'UPDATE_SNAPSHOTS_STATE',
@@ -316,6 +339,21 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
   const setClockSource = useCallback(
     (source: 'internal' | 'midi') => {
       clockEngineRef.current.setClockSource(source);
+
+      // When switching to internal clock mode, send current BPM to OP-XY
+      // to ensure they start in sync
+      if (source === 'internal') {
+        const currentBpm = snapshotsState.clockState.bpm;
+        const midiValue = bpmToMidiValue(currentBpm);
+        const tempoMessage: MIDIMessage = {
+          type: 'cc',
+          channel: 1,
+          cc: 80,
+          value: midiValue,
+        };
+        sendMidiMessage(tempoMessage);
+      }
+
       dispatch({
         type: 'UPDATE_SNAPSHOTS_STATE',
         payload: {
