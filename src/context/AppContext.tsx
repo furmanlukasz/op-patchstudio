@@ -232,7 +232,8 @@ export type AppAction =
   | { type: 'UPDATE_ALL_MULTI_SAMPLES'; payload: Partial<MultisampleFile> }
   | { type: 'UPDATE_ALL_DRUM_SAMPLES'; payload: Partial<DrumSample> }
   | { type: 'CLEAR_ALL_DRUM_SAMPLES' }
-  | { type: 'UPDATE_SNAPSHOTS_STATE'; payload: Partial<SnapshotsState> };
+  | { type: 'UPDATE_SNAPSHOTS_STATE'; payload: Partial<SnapshotsState> }
+  | { type: 'UPDATE_CLOCK_STATE_ATOMIC'; payload: Partial<import('../features/snapshots/types').ClockState> };
 
 // Initial state for drum samples
 const initialDrumSample: DrumSample = {
@@ -1333,6 +1334,21 @@ function appReducer(state: AppState, action: AppAction): AppState {
         snapshotsState: {
           ...state.snapshotsState,
           ...action.payload,
+        },
+      };
+    }
+
+    case 'UPDATE_CLOCK_STATE_ATOMIC': {
+      // FIX 4: Atomic clock state update with deep merge
+      // This prevents lost updates from concurrent state modifications
+      return {
+        ...state,
+        snapshotsState: {
+          ...state.snapshotsState,
+          clockState: {
+            ...state.snapshotsState.clockState,
+            ...action.payload,
+          },
         },
       };
     }

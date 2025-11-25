@@ -88,6 +88,13 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
   const clockSourceRef = useRef(snapshotsState.clockState.source);
   const clockStateRef = useRef(snapshotsState.clockState);
 
+  // FIX 2: Track last sent CC80 to prevent feedback loops
+  const lastSentCC80Ref = useRef<{ timestamp: number; value: number } | null>(null);
+  const lastReceivedCC80Ref = useRef<{ timestamp: number; value: number } | null>(null);
+
+  // FIX 2: Debounce timer for incoming CC80 messages
+  const cc80DebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // Update refs when state changes
   useEffect(() => {
     clockSourceRef.current = snapshotsState.clockState.source;
@@ -107,14 +114,18 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
     const unsubscribeStart = onMidiStart(() => {
       if (clockSourceRef.current === 'midi') {
         clockEngineRef.current.processMidiStart();
-        // Update app state to show clock is running
+
+        // FIX 1: Update ref synchronously BEFORE dispatching
+        clockStateRef.current = {
+          ...clockStateRef.current,
+          isRunning: true,
+        };
+
+        // FIX 4: Use atomic action to prevent lost updates
         dispatch({
-          type: 'UPDATE_SNAPSHOTS_STATE',
+          type: 'UPDATE_CLOCK_STATE_ATOMIC',
           payload: {
-            clockState: {
-              ...clockStateRef.current,
-              isRunning: true,
-            },
+            isRunning: true,
           },
         });
       }
@@ -123,14 +134,18 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
     const unsubscribeStop = onMidiStop(() => {
       if (clockSourceRef.current === 'midi') {
         clockEngineRef.current.processMidiStop();
-        // Update app state to show clock is stopped
+
+        // FIX 1: Update ref synchronously BEFORE dispatching
+        clockStateRef.current = {
+          ...clockStateRef.current,
+          isRunning: false,
+        };
+
+        // FIX 4: Use atomic action to prevent lost updates
         dispatch({
-          type: 'UPDATE_SNAPSHOTS_STATE',
+          type: 'UPDATE_CLOCK_STATE_ATOMIC',
           payload: {
-            clockState: {
-              ...clockStateRef.current,
-              isRunning: false,
-            },
+            isRunning: false,
           },
         });
       }
@@ -139,14 +154,18 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
     const unsubscribeContinue = onMidiContinue(() => {
       if (clockSourceRef.current === 'midi') {
         clockEngineRef.current.processMidiContinue();
-        // Update app state to show clock is running
+
+        // FIX 1: Update ref synchronously BEFORE dispatching
+        clockStateRef.current = {
+          ...clockStateRef.current,
+          isRunning: true,
+        };
+
+        // FIX 4: Use atomic action to prevent lost updates
         dispatch({
-          type: 'UPDATE_SNAPSHOTS_STATE',
+          type: 'UPDATE_CLOCK_STATE_ATOMIC',
           payload: {
-            clockState: {
-              ...clockStateRef.current,
-              isRunning: true,
-            },
+            isRunning: true,
           },
         });
       }
@@ -157,31 +176,62 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
     // When using internal clock, the app is the tempo master
     const unsubscribeCC = onMidiControlChange((cc, value, channel) => {
       if (cc === 80 && channel === 1 && clockSourceRef.current === 'midi') {
-        // Convert MIDI value back to BPM using OP-XY mapping
-        const newBpm = midiValueToBpm(value);
+        const now = Date.now();
 
-        // Validate BPM is in reasonable range (ignore very low values that might be noise)
-        if (newBpm < 40 || newBpm > 240) {
-          console.warn(`[MIDI] Ignoring invalid BPM from CC80: ${newBpm}`);
+        // FIX 2: Prevent feedback loop by ignoring echoed messages
+        // If we sent a CC80 message within the last 100ms with the same value, ignore this incoming message
+        if (
+          lastSentCC80Ref.current &&
+          now - lastSentCC80Ref.current.timestamp < 100 &&
+          lastSentCC80Ref.current.value === value
+        ) {
           return;
         }
 
-        clockEngineRef.current.setBpm(newBpm);
+        // FIX 2: Debounce incoming CC80 to prevent rapid-fire updates
+        // Clear any pending debounce timer
+        if (cc80DebounceTimerRef.current) {
+          clearTimeout(cc80DebounceTimerRef.current);
+        }
 
-        // Update app state
-        dispatch({
-          type: 'UPDATE_SNAPSHOTS_STATE',
-          payload: {
-            clockState: {
-              ...clockStateRef.current,
-              bpm: newBpm,
+        // FIX 2: Track last received CC80
+        lastReceivedCC80Ref.current = { timestamp: now, value };
+
+        // Debounce the BPM update by 50ms to batch rapid changes
+        cc80DebounceTimerRef.current = setTimeout(() => {
+          // Convert MIDI value back to BPM using OP-XY mapping
+          const newBpm = midiValueToBpm(value);
+
+          // Validate BPM is in reasonable range (ignore very low values that might be noise)
+          if (newBpm < 40 || newBpm > 240) {
+            console.warn(`[MIDI] Ignoring invalid BPM from CC80: ${newBpm}`);
+            return;
+          }
+
+          clockEngineRef.current.setBpm(newBpm);
+
+          // FIX 1: Update ref synchronously BEFORE dispatching
+          clockStateRef.current = {
+            ...clockStateRef.current,
+            bpm: newBpm,
+          };
+
+          // FIX 4: Use atomic action to prevent lost updates
+          // Note: We also need to update transitionSettings.internalBpm
+          dispatch({
+            type: 'UPDATE_SNAPSHOTS_STATE',
+            payload: {
+              clockState: {
+                ...clockStateRef.current,
+                bpm: newBpm,
+              },
+              transitionSettings: {
+                ...snapshotsState.transitionSettings,
+                internalBpm: newBpm,
+              },
             },
-            transitionSettings: {
-              ...snapshotsState.transitionSettings,
-              internalBpm: newBpm,
-            },
-          },
-        });
+          });
+        }, 50); // 50ms debounce
       }
     });
 
@@ -191,6 +241,12 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
       unsubscribeStop();
       unsubscribeContinue();
       unsubscribeCC();
+
+      // FIX 2: Clean up debounce timer
+      if (cc80DebounceTimerRef.current) {
+        clearTimeout(cc80DebounceTimerRef.current);
+        cc80DebounceTimerRef.current = null;
+      }
     };
   }, [dispatch, snapshotsState.transitionSettings]);
 
@@ -250,6 +306,12 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
   const startClock = useCallback(() => {
     clockEngineRef.current.start();
 
+    // FIX 1: Update refs synchronously BEFORE dispatching
+    clockStateRef.current = {
+      ...clockStateRef.current,
+      isRunning: true,
+    };
+
     // Send MIDI Start message and sync BPM to OP-XY when using internal clock
     if (snapshotsState.clockState.source === 'internal') {
       sendMidiStart();
@@ -263,16 +325,18 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
         cc: 80,
         value: midiValue,
       };
+
+      // FIX 2: Track sent CC80 to detect echoes
+      lastSentCC80Ref.current = { timestamp: Date.now(), value: midiValue };
+
       sendMidiMessage(tempoMessage);
     }
 
+    // FIX 4: Use atomic action to prevent lost updates
     dispatch({
-      type: 'UPDATE_SNAPSHOTS_STATE',
+      type: 'UPDATE_CLOCK_STATE_ATOMIC',
       payload: {
-        clockState: {
-          ...snapshotsState.clockState,
-          isRunning: true,
-        },
+        isRunning: true,
       },
     });
   }, [dispatch, snapshotsState.clockState]);
@@ -280,18 +344,22 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
   const stopClock = useCallback(() => {
     clockEngineRef.current.stop();
 
+    // FIX 1: Update refs synchronously BEFORE dispatching
+    clockStateRef.current = {
+      ...clockStateRef.current,
+      isRunning: false,
+    };
+
     // Send MIDI Stop message to OP-XY when using internal clock
     if (snapshotsState.clockState.source === 'internal') {
       sendMidiStop();
     }
 
+    // FIX 4: Use atomic action to prevent lost updates
     dispatch({
-      type: 'UPDATE_SNAPSHOTS_STATE',
+      type: 'UPDATE_CLOCK_STATE_ATOMIC',
       payload: {
-        clockState: {
-          ...snapshotsState.clockState,
-          isRunning: false,
-        },
+        isRunning: false,
       },
     });
   }, [dispatch, snapshotsState.clockState]);
@@ -305,6 +373,12 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
     (bpm: number) => {
       clockEngineRef.current.setBpm(bpm);
 
+      // FIX 1: Update refs synchronously BEFORE dispatching to prevent race condition
+      clockStateRef.current = {
+        ...clockStateRef.current,
+        bpm,
+      };
+
       // Only send CC80 (Tempo) to OP-XY when using internal clock
       // When using MIDI clock, OP-XY is the tempo master
       if (snapshotsState.clockState.source === 'internal') {
@@ -316,14 +390,19 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
           cc: 80,
           value: midiValue,
         };
+
+        // FIX 2: Track sent CC80 to detect echoes
+        lastSentCC80Ref.current = { timestamp: Date.now(), value: midiValue };
+
         sendMidiMessage(tempoMessage);
       }
 
+      // FIX 4: Update both clockState and transitionSettings atomically
       dispatch({
         type: 'UPDATE_SNAPSHOTS_STATE',
         payload: {
           clockState: {
-            ...snapshotsState.clockState,
+            ...clockStateRef.current,
             bpm,
           },
           transitionSettings: {
@@ -340,6 +419,14 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
     (source: 'internal' | 'midi') => {
       clockEngineRef.current.setClockSource(source);
 
+      // FIX 1: Update refs synchronously BEFORE dispatching to prevent race condition
+      // This ensures MIDI callbacks always have the latest clock source value
+      clockSourceRef.current = source;
+      clockStateRef.current = {
+        ...clockStateRef.current,
+        source,
+      };
+
       // When switching to internal clock mode, send current BPM to OP-XY
       // to ensure they start in sync
       if (source === 'internal') {
@@ -351,14 +438,19 @@ export function useSnapshotPlayback(): [SnapshotPlaybackState, SnapshotPlaybackA
           cc: 80,
           value: midiValue,
         };
+
+        // FIX 2: Track sent CC80 to detect echoes
+        lastSentCC80Ref.current = { timestamp: Date.now(), value: midiValue };
+
         sendMidiMessage(tempoMessage);
       }
 
+      // FIX 4: Update both clockState and transitionSettings atomically
       dispatch({
         type: 'UPDATE_SNAPSHOTS_STATE',
         payload: {
           clockState: {
-            ...snapshotsState.clockState,
+            ...clockStateRef.current,
             source,
           },
           transitionSettings: {
